@@ -26,6 +26,12 @@ The connection is peer to peer over WebRTC via PeerJS, so there is no server of 
 | V = cockpit / chase camera | ↓ / S = "PELAN!", G = "GAS!" |
 
 Penalties: hitting a tree adds +3s, going off the stage adds +10s. Medals: 🥇🥈🥉.
+
+**Obstacles** (all of them show up on the navigator's map):
+- 🛫 **JUMP!** Purple ramps. You can't steer in the air, and some of them launch you straight into a corner.
+- 🌉 **SKINNY BRIDGE**: a narrow bridge over a river. Miss it and you splash in (+10s).
+- ⚠ **CLIFF OUTSIDE**: a drop on the outside of the corner (red dashed line on the map). Fall off and it's +10s.
+- 💥 The windshield cracks more every time you crash.
 It works on phones too (touch buttons for the driver, a big tablet screen for the navigator).
 
 ## Credits

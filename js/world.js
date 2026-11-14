@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ROAD_HALF, SHOULDER, mulberry32 } from './track.js';
+import { ROAD_HALF, SHOULDER, BRIDGE_HALF, mulberry32 } from './track.js';
 
 // Tree / obstacle colliders in a hashed grid
 export class Colliders {
@@ -18,20 +18,25 @@ export class Colliders {
 function ribbon(track, offL, offR, y, color, opts = {}) {
   const { X, Z, TX, TZ, n } = track;
   const step = opts.step || 1;
-  const pos = [], idx = [];
+  const F = (o, i) => (typeof o === 'function' ? o(i) : o);
+  const pos = [], idx = [], cols = [];
+  const cA = opts.colors && new THREE.Color(opts.colors[0]), cB = opts.colors && new THREE.Color(opts.colors[1]);
   let v = 0;
-  for (let i = 0; i < n; i += step) {
+  for (let i = opts.i0 || 0; i <= Math.min(n - 1, opts.i1 ?? n - 1); i += step) {
     const lx = TZ[i], lz = -TX[i]; // left vector
-    pos.push(X[i] + lx * offL, y, Z[i] + lz * offL, X[i] + lx * offR, y, Z[i] + lz * offR);
+    const a = F(offL, i), b = F(offR, i);
+    pos.push(X[i] + lx * a, y, Z[i] + lz * a, X[i] + lx * b, y, Z[i] + lz * b);
+    if (cA) cols.push(cA.r, cA.g, cA.b, cB.r, cB.g, cB.b);
     if (v > 0) { const a = (v - 1) * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
     v++;
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  if (cA) g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
   g.setIndex(idx); g.computeVertexNormals();
   // make sure normals face up regardless of winding
   const nr = g.attributes.normal; for (let i = 0; i < nr.count; i++) nr.setXYZ(i, 0, 1, 0);
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -(opts.layer || 1), polygonOffsetUnits: -(opts.layer || 1) }));
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color, vertexColors: !!cA, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -(opts.layer || 1), polygonOffsetUnits: -(opts.layer || 1) }));
   m.receiveShadow = true;
   return m;
 }
@@ -71,6 +76,7 @@ function groundTexture() {
 export function buildWorld(scene, track, assets) {
   const group = new THREE.Group(); scene.add(group);
   const colliders = new Colliders();
+  const rimMat = new THREE.MeshLambertMaterial({ color: 0x8d8a85, flatShading: true });
   const rnd = mulberry32(track.seed * 31 + 5);
 
   // bounds
@@ -84,10 +90,65 @@ export function buildWorld(scene, track, assets) {
   ground.rotation.x = -Math.PI / 2; ground.position.set(cx, 0, cz); ground.receiveShadow = true; group.add(ground);
 
   // road layers
-  group.add(ribbon(track, ROAD_HALF + SHOULDER, -(ROAD_HALF + SHOULDER), 0.0, 0xc9a574, { layer: 1 }));
-  group.add(ribbon(track, ROAD_HALF, -ROAD_HALF, 0.0, 0x4a4d55, { layer: 2 }));
-  group.add(ribbon(track, ROAD_HALF - 0.25, ROAD_HALF - 0.45, 0.0, 0xf2f2f2, { layer: 3 }));
-  group.add(ribbon(track, -(ROAD_HALF - 0.25), -(ROAD_HALF - 0.45), 0.0, 0xf2f2f2, { layer: 3 }));
+  const HW = track.HALF;
+  const sh = (i) => (HW[i] < ROAD_HALF ? HW[i] + 0.3 : ROAD_HALF + SHOULDER);
+  group.add(ribbon(track, sh, (i) => -sh(i), 0.0, 0xc9a574, { layer: 1 }));
+  group.add(ribbon(track, (i) => HW[i], (i) => -HW[i], 0.0, 0x4a4d55, { layer: 2 }));
+  group.add(ribbon(track, (i) => HW[i] - 0.25, (i) => HW[i] - 0.45, 0.0, 0xf2f2f2, { layer: 3 }));
+  group.add(ribbon(track, (i) => -(HW[i] - 0.25), (i) => -(HW[i] - 0.45), 0.0, 0xf2f2f2, { layer: 3 }));
+
+  // ---- cliffs: misty drop on the outside of some corners ----
+  for (const sg of track.segs) {
+    if (!sg.cliff) continue;
+    const side = -sg.dir, i0 = Math.round(sg.s0 / 2), i1 = Math.round(sg.s1 / 2);
+    const e = ROAD_HALF + SHOULDER + 0.8;
+    group.add(ribbon(track, side * (ROAD_HALF + SHOULDER), side * e, 0, 0x8d8a85, { layer: 2, i0, i1 }));
+    group.add(ribbon(track, side * e, side * (e + 45), 0, 0xffffff, { layer: 2, i0, i1, colors: [0x262c36, 0xb9ccd8] }));
+    // jagged rocks on the rim
+    for (let i = i0; i <= i1; i += 3) {
+      const o = side * (e - 0.1), rk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.35 + rnd() * 0.3, 0), rimMat);
+      rk.position.set(track.X[i] + track.TZ[i] * o, 0.1, track.Z[i] - track.TX[i] * o); rk.rotation.set(rnd() * 3, rnd() * 3, 0);
+      group.add(rk);
+    }
+  }
+
+  // ---- skinny bridges over a river ----
+  const waterMat = new THREE.MeshLambertMaterial({ color: 0x3f93d6, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const woodMat = new THREE.MeshLambertMaterial({ color: 0x8a5a33 });
+  for (const b of track.bridges) {
+    const bg = new THREE.Group(); bg.position.set(b.x, 0, b.z); bg.rotation.y = b.h;
+    const w = new THREE.Mesh(new THREE.PlaneGeometry(90, b.len - 4), waterMat); w.rotation.x = -Math.PI / 2; w.position.y = 0.005; w.receiveShadow = true; bg.add(w);
+    const bank = new THREE.MeshLambertMaterial({ color: 0xd9c38f, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    for (const sz of [-1, 1]) {
+      const bk = new THREE.Mesh(new THREE.PlaneGeometry(90, 1.6), bank); bk.rotation.x = -Math.PI / 2; bk.position.set(0, 0.004, sz * ((b.len - 4) / 2 + 0.8)); bg.add(bk);
+    }
+    for (const sx of [-1, 1]) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.22, b.len), woodMat); beam.position.set(sx * (BRIDGE_HALF + 0.2), 0.11, 0); beam.castShadow = true; bg.add(beam);
+      for (let z = -b.len / 2; z <= b.len / 2; z += 6) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.5, 0.22), woodMat); post.position.set(sx * (BRIDGE_HALF + 0.2), 0.25, z); bg.add(post);
+      }
+    }
+    group.add(bg);
+  }
+
+  // ---- jump ramps ----
+  const rampTex = (() => {
+    const c = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d');
+    x.fillStyle = '#ffc93c'; x.fillRect(0, 0, 128, 64); x.fillStyle = '#1d1b26';
+    for (let i = -64; i < 128; i += 32) { x.beginPath(); x.moveTo(i, 64); x.lineTo(i + 16, 64); x.lineTo(i + 48, 0); x.lineTo(i + 32, 0); x.fill(); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 1); return t;
+  })();
+  for (const rp of track.ramps) {
+    const geo = new THREE.BoxGeometry(ROAD_HALF * 2 + 1, 1, rp.len, 1, 1, 1);
+    geo.translate(0, 0.5, rp.len / 2);
+    const pa = geo.attributes.position;
+    for (let k = 0; k < pa.count; k++) { if (pa.getY(k) > 0.5) pa.setY(k, Math.max(0.02, (rp.h * pa.getZ(k)) / rp.len)); else pa.setY(k, 0); }
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: rampTex }));
+    const i = Math.round(rp.s / 2);
+    m.position.set(track.X[i], 0, track.Z[i]); m.rotation.y = track.H[i]; m.castShadow = true; m.receiveShadow = true;
+    group.add(m);
+  }
   group.add(dashes(track, 0, 0.0, 0xf4f4f4, 4, 6, 0.12));
 
   // start + finish gates
@@ -118,7 +179,7 @@ export function buildWorld(scene, track, assets) {
     for (const side of [1, -1]) {
       const off = side * (ROAD_HALF + SHOULDER + 0.4);
       const x = track.X[i] + track.TZ[i] * off, z = track.Z[i] - track.TX[i] * off;
-      if (track.roadDist(x, z) < ROAD_HALF + SHOULDER) continue;
+      if (track.roadDist(x, z) < ROAD_HALF + SHOULDER || track.HALF[i] < ROAD_HALF || track.inRiver(x, z)) continue;
       m4.makeTranslation(x, 0, z); posts.setMatrixAt(pc++, m4);
     }
   }
@@ -137,7 +198,7 @@ export function buildWorld(scene, track, assets) {
   const q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
   let tc = 0, pcount = 0, rcount = 0;
   const addTree = (x, z, scale) => {
-    if (tc >= MAX) return;
+    if (tc >= MAX || track.inRiver(x, z) || track.inChasm(x, z)) return;
     q.setFromAxisAngle(up, rnd() * 6.28); s.set(scale, scale * (0.85 + rnd() * 0.3), scale); p.set(x, 0, z);
     m4.compose(p, q, s);
     trunks.setMatrixAt(tc++, m4);
@@ -190,7 +251,7 @@ export function buildWorld(scene, track, assets) {
         if (rnd() < 0.35) continue;
         const lat = side * (34 + rnd() * 40);
         const x = track.X[i] + track.TZ[i] * lat, z = track.Z[i] - track.TX[i] * lat;
-        if (track.roadDist(x, z) < 22) continue;
+        if (track.roadDist(x, z) < 22 || track.inRiver(x, z) || track.inChasm(x, z)) continue;
         const sc = 1.3 + rnd() * 0.6;
         q.setFromAxisAngle(up, Math.floor(rnd() * 4) * Math.PI / 2); s.set(sc, sc, sc); p.set(x, 0, z);
         m4.compose(p, q, s);
@@ -212,7 +273,7 @@ export function buildWorld(scene, track, assets) {
     const side = rnd() < 0.5 ? 1 : -1;
     const lat = side * (ROAD_HALF + SHOULDER + 2 + rnd() * 14);
     const x = track.X[i] + track.TZ[i] * lat, z = track.Z[i] - track.TX[i] * lat;
-    if (track.roadDist(x, z) < ROAD_HALF + SHOULDER + 1.5) continue;
+    if (track.roadDist(x, z) < ROAD_HALF + SHOULDER + 1.5 || track.inRiver(x, z) || track.inChasm(x, z)) continue;
     const sc = 0.4 + rnd() * 0.9;
     q.setFromEuler(new THREE.Euler(rnd() * 3, rnd() * 3, rnd() * 3)); s.set(sc * 1.3, sc, sc * 1.1); p.set(x, sc * 0.3, z);
     m4.compose(p, q, s); rocks.setMatrixAt(rc++, m4);
@@ -293,5 +354,38 @@ export function buildCockpit() {
     placeArm(navArms[1], v(-0.2, 0.92, -0.25), v(-0.22, 0.95 + bob, 0.42));
   }
   update(0, 0);
-  return { group: g, update, tablet };
+
+  // windscreen that cracks a bit more every crash
+  const cc = document.createElement('canvas'); cc.width = 1024; cc.height = 360;
+  const cx = cc.getContext('2d');
+  const crackTex = new THREE.CanvasTexture(cc); crackTex.colorSpace = THREE.SRGBColorSpace;
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(1.76, 0.62), new THREE.MeshBasicMaterial({ map: crackTex, transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide }));
+  glass.position.set(0, 1.37, 0.97); glass.rotation.x = -0.5; glass.renderOrder = 10;
+  g.add(glass);
+  let cracks = 0;
+  function addCrack(u = Math.random(), v = Math.random()) {
+    cracks++;
+    const W = cc.width, H = cc.height, px = (0.12 + u * 0.76) * W, py = (0.15 + v * 0.6) * H;
+    cx.strokeStyle = 'rgba(255,255,255,0.85)'; cx.lineCap = 'round';
+    const arms = 8 + Math.floor(Math.random() * 5);
+    for (let a = 0; a < arms; a++) {
+      let ang = (a / arms) * Math.PI * 2 + Math.random() * 0.4, x = px, y = py;
+      const len = 60 + Math.random() * 160;
+      cx.lineWidth = 2.5; cx.beginPath(); cx.moveTo(x, y);
+      for (let d = 0; d < len; d += 18) { ang += (Math.random() - 0.5) * 0.5; x += Math.cos(ang) * 18; y += Math.sin(ang) * 18; cx.lineTo(x, y); }
+      cx.stroke();
+    }
+    cx.lineWidth = 1.5;
+    for (const rad of [22, 48]) {
+      cx.beginPath();
+      for (let k = 0; k <= arms; k++) { const an = (k / arms) * Math.PI * 2, rr = rad * (0.8 + Math.random() * 0.4); k ? cx.lineTo(px + Math.cos(an) * rr, py + Math.sin(an) * rr) : cx.moveTo(px + Math.cos(an) * rr, py + Math.sin(an) * rr); }
+      cx.stroke();
+    }
+    cx.fillStyle = 'rgba(255,255,255,0.55)'; cx.beginPath(); cx.arc(px, py, 7, 0, Math.PI * 2); cx.fill();
+    // glass gets milkier the more you crash
+    cx.fillStyle = 'rgba(235,240,245,0.07)'; cx.fillRect(0, 0, W, H);
+    crackTex.needsUpdate = true;
+  }
+  function clearCracks() { cracks = 0; cx.clearRect(0, 0, cc.width, cc.height); crackTex.needsUpdate = true; }
+  return { group: g, update, tablet, addCrack, clearCracks };
 }

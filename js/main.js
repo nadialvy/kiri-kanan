@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { generateTrack, medalTimes, DS } from './track.js';
+import { generateTrack, medalTimes, DS, ROAD_HALF, SHOULDER } from './track.js';
 import { buildWorld, buildCockpit } from './world.js';
 import { createCar, stepCar, manualReset, speedOf } from './car.js';
 import { Net } from './net.js';
@@ -191,8 +191,17 @@ net.on('req', (d) => {
 net.on('tolobby', () => goLobby(false));
 net.on('s', (d) => { if (G.role === 'nav') { d.rt = performance.now(); G.snaps.push(d); if (G.snaps.length > 30) G.snaps.shift(); } });
 net.on('call', (d) => { if (G.role === 'driver') showCallout(d.d, true); });
-net.on('crash', (d) => { if (G.role === 'nav') { sfx.impact(d.k); G.shake = Math.max(G.shake, d.k); flashPen(); } });
-net.on('reset', () => { if (G.role === 'nav') { toast('keluar jalur! +10 detik'); flashPen(); } });
+net.on('crash', (d) => { if (G.role === 'nav') { sfx.impact(d.k); G.shake = Math.max(G.shake, d.k); flashPen(); cockpit.addCrack(d.cx, d.cy); } });
+net.on('fall', (d) => { if (G.role === 'nav') onFall(d.k); });
+net.on('land', (d) => { if (G.role === 'nav') onLand(d.k); });
+net.on('reset', (d) => { if (G.role === 'nav') { if (!d.fell) toast('keluar jalur! +10 detik'); flashPen(); } });
+function onFall(k) {
+  G.fellAt = performance.now();
+  if (k === 'water') { toast('BYUR! kecebur sungai 💦 +10 detik'); sfx.impact(0.5); sfx.beep(180, 0.3); }
+  else { toast('AAAA jatuh ke jurang 😱 +10 detik'); sfx.beep(330, 0.15); setTimeout(() => sfx.impact(1), 700); }
+  flashPen();
+}
+function onLand(k) { if (k > 0.25) { sfx.impact(k * 0.6); G.shake = Math.max(G.shake, k * 0.6); } }
 net.on('finish', (d) => { if (G.role === 'nav') showFinish(d); });
 
 function goLobby(broadcast) {
@@ -211,7 +220,8 @@ function startRace(seed, fog, role) {
   buildStage(seed);
   scene.fog.near = FOG[fog].near; scene.fog.far = FOG[fog].far;
   G.mode = 'race'; G.phase = 'countdown'; G.t = -3; G.snaps = []; G.camMode = 'cockpit';
-  G.view = { x: G.car.x, z: G.car.z, h: G.car.h, steer: 0, v: 0, idx: G.car.idx, slip: 0, t: -3, pen: 0, phase: 'countdown' };
+  cockpit.clearCracks();
+  G.view = { x: G.car.x, z: G.car.z, y: 0, vy: 0, h: G.car.h, steer: 0, v: 0, idx: G.car.idx, slip: 0, t: -3, pen: 0, phase: 'countdown' };
   G.lastSend = 0; G.lastCount = 4;
   show('hud');
   const isDriver = role === 'driver';
@@ -220,7 +230,7 @@ function startRace(seed, fog, role) {
   $('touch').classList.toggle('hidden', !(isDriver && matchMedia('(pointer: coarse)').matches));
   $('btnMicHud').classList.toggle('hidden', G.solo);
   $('hint').innerHTML = isDriver
-    ? (G.solo ? 'W/↑ gas · A D / ← → belok · R reset (+10s) · V kamera · M peta' : 'W/↑ gas · A D / ← → belok · R reset (+10s) · V kamera<br/>dengerin navigator-mu 👂')
+    ? (G.solo ? 'W/↑ gas · A D / ← → belok · R reset (+10s) · V kamera · M peta<br/>awas jurang, jembatan sempit &amp; ramp 🛫' : 'W/↑ gas · A D / ← → belok · R reset (+10s) · V kamera<br/>dengerin navigator-mu 👂')
     : '← ↑ → atau A W D = panggil arah · S = pelan · G = gas!<br/>kamu yang liat peta. jagain supirnya ya 🫶';
   $('callout').className = ''; $('pen').textContent = '';
   sfx.startLoops();
@@ -304,19 +314,25 @@ function simulate(dt) {
     else if (G.phase === 'running') G.t += STEP;
     const inp = { steer: (input.left || input.tL ? 1 : 0) - (input.right || input.tR ? 1 : 0), gas: input.gas || input.tGas ? 1 : 0 };
     const ev = stepCar(c, inp, STEP, tr, G.world.colliders, performance.now() / 1000, G.phase === 'running');
-    if (ev.crash) { sfx.impact(ev.crash); G.shake = Math.max(G.shake, ev.crash); flashPen(); net.send({ t: 'crash', k: ev.crash }); }
-    if (ev.reset) { toast('keluar jalur! +10 detik'); flashPen(); net.send({ t: 'reset' }); }
+    if (ev.crash) {
+      const cx = Math.random(), cy = Math.random();
+      sfx.impact(ev.crash); G.shake = Math.max(G.shake, ev.crash); flashPen(); cockpit.addCrack(cx, cy);
+      net.send({ t: 'crash', k: ev.crash, cx, cy });
+    }
+    if (ev.fall) { onFall(ev.fall); net.send({ t: 'fall', k: ev.fall }); }
+    if (ev.land) { onLand(ev.land); net.send({ t: 'land', k: ev.land }); }
+    if (ev.reset) { const fell = performance.now() - (G.fellAt || 0) < 3000; if (!fell) toast('keluar jalur! +10 detik'); flashPen(); net.send({ t: 'reset', fell }); }
     if (G.phase === 'running' && c.idx >= tr.n - 30) {
       const d = { t: 'finish', time: G.t, pen: c.penalty, crashes: c.crashes, resets: c.resets };
       net.send(d); showFinish(d);
     }
   }
   const v = G.view;
-  Object.assign(v, { x: c.x, z: c.z, h: c.h, steer: c.steer, v: speedOf(c), idx: c.idx, slip: c.slip, t: G.t, pen: c.penalty, phase: G.phase, gas: input.gas || input.tGas, surface: c.surface });
+  Object.assign(v, { x: c.x, z: c.z, y: c.y, vy: c.air || c.fall > 0 ? c.vy : c.groundV, h: c.h, steer: c.steer, v: speedOf(c), idx: c.idx, slip: c.slip, t: G.t, pen: c.penalty, phase: G.phase, gas: input.gas || input.tGas, surface: c.surface });
   const now = performance.now();
   if (!G.solo && now - G.lastSend > 33) {
     G.lastSend = now;
-    net.send({ t: 's', x: +c.x.toFixed(2), z: +c.z.toFixed(2), h: +c.h.toFixed(4), st: +c.steer.toFixed(3), v: +v.v.toFixed(2), i: c.idx, sl: +c.slip.toFixed(2), tm: +G.t.toFixed(2), pen: c.penalty, ph: G.phase, g: v.gas ? 1 : 0, sf: c.surface });
+    net.send({ t: 's', x: +c.x.toFixed(2), z: +c.z.toFixed(2), y: +c.y.toFixed(2), vy: +v.vy.toFixed(2), h: +c.h.toFixed(4), st: +c.steer.toFixed(3), v: +v.v.toFixed(2), i: c.idx, sl: +c.slip.toFixed(2), tm: +G.t.toFixed(2), pen: c.penalty, ph: G.phase, g: v.gas ? 1 : 0, sf: c.surface });
   }
 }
 
@@ -330,12 +346,12 @@ function interpolate() {
   const span = b.rt - a.rt;
   const t = span > 0 ? Math.max(0, Math.min(1.2, (rt - a.rt) / span)) : 1;
   const v = G.view;
-  v.x = a.x + (b.x - a.x) * t; v.z = a.z + (b.z - a.z) * t; v.h = lerpAngle(a.h, b.h, t);
+  v.x = a.x + (b.x - a.x) * t; v.z = a.z + (b.z - a.z) * t; v.y = (a.y || 0) + ((b.y || 0) - (a.y || 0)) * t; v.vy = b.vy || 0; v.h = lerpAngle(a.h, b.h, t);
   v.steer = b.st; v.v = b.v; v.idx = b.i; v.slip = b.sl; v.t = b.tm; v.pen = b.pen; v.phase = b.ph; v.gas = b.g; v.surface = b.sf;
 }
 
 // ---------------- maps ----------------
-const sevColor = (sev) => (sev <= 2 ? '#ff4d4d' : sev <= 4 ? '#ffa53a' : sev <= 6 ? '#ffe14d' : '#9be37d');
+const sevColor = (sev) => (sev <= 2 ? '#ff4d4d' : sev <= 4 ? '#ffa53a' : sev <= 6 ? '#ffe14d' : sev === 8 ? '#6fd0ff' : sev === 9 ? '#d08bff' : '#9be37d');
 function drawMap(canvas, big) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const W = canvas.clientWidth, H = canvas.clientHeight;
@@ -365,6 +381,29 @@ function drawMap(canvas, big) {
   }
   // driven part
   path(i0, v.idx); g.strokeStyle = 'rgba(120,200,255,0.55)'; g.lineWidth = 2.5; g.stroke();
+  // features: rivers, cliffs, ramps
+  const W2 = (x, z) => { const dx = x - v.x, dz = z - v.z; return [cx - (dx * lx + dz * lz) * scale, cy - (dx * fx + dz * fz) * scale]; };
+  for (const b of tr.bridges) {
+    const bi = Math.round((b.s0 + b.s1) / 2 / DS); if (bi < i0 - 20 || bi > i1 + 20) continue;
+    const tx = Math.sin(b.h), tz = Math.cos(b.h), hl = (b.len - 4) / 2;
+    const pts = [[-45, -hl], [45, -hl], [45, hl], [-45, hl]].map(([a, l]) => W2(b.x + tz * a + tx * l, b.z - tx * a + tz * l));
+    g.fillStyle = 'rgba(63,147,214,0.55)'; g.beginPath(); pts.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.fill();
+    path(Math.round(b.s0 / DS), Math.round(b.s1 / DS)); g.strokeStyle = '#8a5a33'; g.lineWidth = Math.max(3, 5.4 * scale); g.stroke();
+  }
+  g.setLineDash([6, 5]); g.strokeStyle = '#ff4d4d'; g.lineWidth = 3;
+  for (const sg of tr.segs) {
+    if (!sg.cliff) continue;
+    const a = Math.max(i0, Math.round(sg.s0 / DS)), b = Math.min(i1, Math.round(sg.s1 / DS)); if (a >= b) continue;
+    const off = -sg.dir * (ROAD_HALF + SHOULDER + 2);
+    g.beginPath();
+    for (let i = a; i <= b; i++) { const [x, y] = W2(tr.X[i] + tr.TZ[i] * off, tr.Z[i] - tr.TX[i] * off); i === a ? g.moveTo(x, y) : g.lineTo(x, y); }
+    g.stroke();
+  }
+  g.setLineDash([]);
+  for (const rp of tr.ramps) {
+    const ri = Math.round(rp.s / DS); if (ri < i0 || ri > i1) continue;
+    const [x, y] = P(ri); g.fillStyle = '#d08bff'; g.beginPath(); g.moveTo(x - 9, y + 5); g.lineTo(x + 9, y + 5); g.lineTo(x + 9, y - 6); g.closePath(); g.fill();
+  }
   // finish
   if (tr.n - 30 <= i1) { const [x, y] = P(tr.n - 30); g.font = '20px sans-serif'; g.textAlign = 'center'; g.fillText('🏁', x, y + 7); }
   // labels
@@ -442,7 +481,9 @@ function botNavigator() {
 const camTarget = new THREE.Vector3();
 function updateCamera(dt, t) {
   const v = G.view;
-  carGroup.position.set(v.x, 0, v.z); carGroup.rotation.y = v.h;
+  carGroup.position.set(v.x, v.y || 0, v.z); carGroup.rotation.order = 'YXZ'; carGroup.rotation.y = v.h;
+  const pitch = Math.atan2(v.vy || 0, Math.max(6, v.v)) * 0.8;
+  carGroup.rotation.x += (-pitch - carGroup.rotation.x) * Math.min(1, dt * 10);
   cockpit.update(v.steer, t);
   if (wheels.length) { for (let i = 0; i < wheels.length; i++) { wheels[i].rotation.x += (v.v * dt) / 0.5; if (i < 2) wheels[i].rotation.y = v.steer * 0.45; } }
   G.shake = Math.max(0, G.shake - dt * 2.2);
@@ -462,10 +503,10 @@ function updateCamera(dt, t) {
     if (camera.parent !== scene) scene.add(camera);
     if (G.mode === 'race') {
       const back = 9, up = 3.6;
-      camTarget.set(v.x - Math.sin(v.h) * back, up, v.z - Math.cos(v.h) * back);
+      camTarget.set(v.x - Math.sin(v.h) * back, up + Math.max(-2, v.y || 0), v.z - Math.cos(v.h) * back);
       camera.position.lerp(camTarget, 1 - Math.exp(-dt * 6));
       camera.position.x += jx * 3; camera.position.y += jy * 3;
-      camera.lookAt(v.x + Math.sin(v.h) * 4, 1.2, v.z + Math.cos(v.h) * 4);
+      camera.lookAt(v.x + Math.sin(v.h) * 4, 1.2 + (v.y || 0), v.z + Math.cos(v.h) * 4);
     } else {
       // menu orbit
       const a = t * 0.18;
@@ -507,3 +548,4 @@ function frame(now) {
   $('loading').classList.add('hidden');
   requestAnimationFrame(frame);
 })();
+if (params.has('debug')) window.__kk = { G, net, carGroup, camera, cockpit, input };

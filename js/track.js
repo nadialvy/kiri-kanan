@@ -2,6 +2,8 @@
 export const DS = 2;            // metres between centreline samples
 export const ROAD_HALF = 4;     // asphalt half width
 export const SHOULDER = 1.6;    // dirt shoulder each side
+export const BRIDGE_HALF = 2.7; // skinny bridge half width
+export const RAMP_LEN = 5, RAMP_H = 1.15;
 
 export function mulberry32(a) {
   return function () {
@@ -100,6 +102,32 @@ function buildTrack(seed, sub, targetLen) {
   for (let i = 0; i < n; i++) { TX[i] = Math.sin(H[i]); TZ[i] = Math.cos(H[i]); }
   const length = (n - 1) * DS;
 
+  // ----- features: skinny bridges, jump ramps, cliffs -----
+  const HALF = new Float32Array(n).fill(ROAD_HALF);
+  const CLIFF = new Int8Array(n); // +1 = drop on the left, -1 = drop on the right
+  const ramps = [], bridges = [], featNotes = [];
+  for (let k = 1; k < segs.length; k++) {
+    const sg = segs[k], next = segs[k + 1];
+    const L = sg.s1 - sg.s0;
+    if (sg.type === 'S' && !sg.finish) {
+      if (L >= 70 && rnd() < 0.45) {
+        const bl = Math.min(40, L - 30), b0 = sg.s0 + (L - bl) / 2, b1 = b0 + bl;
+        for (let i = Math.ceil(b0 / DS); i <= Math.floor(b1 / DS); i++) HALF[i] = BRIDGE_HALF;
+        const im = Math.round((b0 + b1) / 2 / DS);
+        bridges.push({ s0: b0, s1: b1, x: X[im], z: Z[im], h: H[im], len: bl });
+        featNotes.push({ s: b0, s1: b1, dir: 'S', sev: 8, kind: 'bridge', label: 'SKINNY BRIDGE', sub: 'tengah, jangan belok!' });
+      } else if (L >= 45 && rnd() < 0.6) {
+        const rs = sg.s1 - 28;
+        ramps.push({ s: rs, len: RAMP_LEN, h: RAMP_H });
+        const into = next && next.type === 'C' ? `INTO ${next.sev === 1 ? 'HAIRPIN' : next.sev} ${next.dir > 0 ? 'LEFT' : 'RIGHT'}!` : 'lurus, ga bisa belok di udara';
+        featNotes.push({ s: rs, s1: rs + RAMP_LEN, dir: 'S', sev: 9, kind: 'jump', label: 'JUMP!', sub: into });
+      }
+    } else if (sg.type === 'C' && !sg.trees && sg.sev >= 2 && sg.sev <= 5 && rnd() < 0.4) {
+      sg.cliff = true;
+      for (let i = Math.round(sg.s0 / DS); i <= Math.round(sg.s1 / DS); i++) CLIFF[i] = -sg.dir;
+    }
+  }
+
   // ----- pace notes -----
   const notes = [];
   for (let i = 0; i < segs.length; i++) {
@@ -110,6 +138,7 @@ function buildTrack(seed, sub, targetLen) {
       const extras = [];
       if (s.sev >= 3 && s.ang > 1.75) extras.push('LONG');
       if (s.trees) extras.push("TREES, DON'T CUT");
+      if (s.cliff) extras.push('⚠ CLIFF OUTSIDE');
       const next = segs[i + 1];
       if (next && next.type === 'C') extras.push('INTO');
       notes.push({ s: s.s0, s1: s.s1, dir: s.dir > 0 ? 'L' : 'R', sev: s.sev, label: `${name} ${dirTxt}`, sub: extras.join(' · ') });
@@ -119,6 +148,9 @@ function buildTrack(seed, sub, targetLen) {
       notes.push({ s: s.s0, s1: s.s1, dir: 'S', sev: 7, label: `STRAIGHT ${Math.round((s.s1 - s.s0) / 10) * 10}`, sub: 'flat out' });
     }
   }
+
+  notes.push(...featNotes);
+  notes.sort((a, b) => a.s - b.s);
 
   // ----- spatial grid of samples for fast proximity queries -----
   const CELL = 25, grid = new Map();
@@ -144,10 +176,37 @@ function buildTrack(seed, sub, targetLen) {
     // lateral offset (+ = left of travel direction)
     const dx = x - X[bi], dz = z - Z[bi];
     const lat = dx * TZ[bi] - dz * TX[bi];
-    return { i: bi, dist: Math.sqrt(bd), lat, s: bi * DS };
+    const along = dx * TX[bi] + dz * TZ[bi];
+    return { i: bi, dist: Math.sqrt(bd), lat, s: bi * DS + along };
+  }
+  // nearest sample anywhere (grid based), for world decoration
+  function nearestAny(x, z) {
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    let bi = -1, bd = 1e18;
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      const arr = grid.get(key(cx + a, cz + b)); if (!arr) continue;
+      for (const i of arr) { const dx = X[i] - x, dz = Z[i] - z, d = dx * dx + dz * dz; if (d < bd) { bd = d; bi = i; } }
+    }
+    if (bi < 0) return null;
+    return { i: bi, lat: (x - X[bi]) * TZ[bi] - (z - Z[bi]) * TX[bi] };
+  }
+  function groundAt(s, lat) {
+    for (const r of ramps) if (s >= r.s && s <= r.s + r.len && Math.abs(lat) <= ROAD_HALF + 0.6) return (r.h * (s - r.s)) / r.len;
+    return 0;
+  }
+  function inRiver(x, z) {
+    for (const b of bridges) {
+      const dx = x - b.x, dz = z - b.z, tx = Math.sin(b.h), tz = Math.cos(b.h);
+      if (Math.abs(dx * tx + dz * tz) < b.len / 2 - 2 && Math.abs(dx * tz - dz * tx) < 45) return true;
+    }
+    return false;
+  }
+  function inChasm(x, z) {
+    const q = nearestAny(x, z); if (!q || !CLIFF[q.i]) return false;
+    return Math.sign(q.lat) === CLIFF[q.i] && Math.abs(q.lat) > ROAD_HALF + SHOULDER + 0.8;
   }
 
-  return { seed, X, Z, H, K, TX, TZ, n, length, segs, notes, roadDist, nearest };
+  return { seed, X, Z, H, K, TX, TZ, n, length, segs, notes, roadDist, nearest, HALF, CLIFF, ramps, bridges, groundAt, inRiver, inChasm };
 }
 
 export function medalTimes(length) {
