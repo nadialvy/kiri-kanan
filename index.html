@@ -29,6 +29,7 @@
       <button id="btnJoin" class="big">Gabung</button>
     </div>
     <button id="btnSolo" class="ghost">Latihan solo (navigator bot)</button>
+    <button class="ghost small openSettings">⚙️ Pengaturan suara</button>
     <p id="menuMsg" class="msg"></p>
   </div>
   <p class="credit">3D models &amp; sounds: <a href="https://kenney.nl" target="_blank" rel="noopener">Kenney</a> (CC0)</p>
@@ -52,7 +53,7 @@
       <label>Kabut <select id="selFog"><option value="0">Tipis</option><option value="1" selected>Sedang</option><option value="2">Tebal 😵</option></select></label>
       <label>Track <span id="seedLbl" class="mono">#0000</span> <button id="btnSeed" class="ghost small">🎲</button></label>
     </div>
-    <button id="btnMic" class="ghost small">🎤 Voice chat: off</button>
+    <div class="row"><button id="btnMic" class="ghost small">🎤 Voice chat: off</button><button class="ghost small openSettings">⚙️ Suara</button></div>
     <button id="btnStart" class="big primary" disabled>Mulai!</button>
     <button id="btnLeave" class="ghost small">keluar</button>
   </div>
@@ -90,6 +91,7 @@
   </div>
   <div class="hudBtns">
     <button id="btnMicHud" class="ghost small hidden">🎤</button>
+    <button class="ghost small openSettings">⚙️</button>
     <button id="btnQuit" class="ghost small">✕</button>
   </div>
 </section>
@@ -111,6 +113,17 @@
       <button id="finMenu" class="ghost">Menu</button>
     </div>
     <p id="finWait" class="msg"></p>
+  </div>
+</section>
+
+<!-- ============ SETTINGS ============ -->
+<section id="settings" class="screen hidden">
+  <div class="card">
+    <h2>Pengaturan suara</h2>
+    <label class="vol"><span>🚗 Suara mobil <small>mesin, ban, tabrakan, aba-aba</small></span><input type="range" id="volCar" min="0" max="100" step="1" /><b id="volCarV"></b></label>
+    <label class="vol"><span>🎧 Suara teman <small>suara voice chat dari temanmu</small></span><input type="range" id="volVoice" min="0" max="100" step="1" /><b id="volVoiceV"></b></label>
+    <label class="vol"><span>🎤 Mic-ku <small>sekencang apa suaramu kedengeran di temanmu</small></span><input type="range" id="volMic" min="0" max="200" step="5" /><b id="volMicV"></b></label>
+    <button id="btnSettingsClose" class="big primary">Oke</button>
   </div>
 </section>
 

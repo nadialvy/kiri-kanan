@@ -147,6 +147,25 @@ async function micToggle() {
 }
 $('btnMic').onclick = micToggle; $('btnMicHud').onclick = micToggle;
 
+// ---------------- sound settings (saved per browser) ----------------
+const VOL = { car: 70, voice: 100, mic: 100 };
+try { Object.assign(VOL, JSON.parse(localStorage.getItem('kk-volume') || '{}')); } catch (_) {}
+function applyVolume() {
+  sfx.setVolume(VOL.car / 100);
+  net.setVoiceVolume(VOL.voice / 100);
+  net.setMicGain(VOL.mic / 100);
+  $('volCarV').textContent = VOL.car + '%'; $('volVoiceV').textContent = VOL.voice + '%'; $('volMicV').textContent = VOL.mic + '%';
+  try { localStorage.setItem('kk-volume', JSON.stringify(VOL)); } catch (_) {}
+}
+for (const [id, k] of [['volCar', 'car'], ['volVoice', 'voice'], ['volMic', 'mic']]) {
+  $(id).value = VOL[k];
+  $(id).addEventListener('input', () => { VOL[k] = +$(id).value; applyVolume(); if (k === 'car') { sfx.init(); sfx.beep(660, 0.06); } });
+}
+applyVolume();
+document.querySelectorAll('.openSettings').forEach((b) => (b.onclick = () => $('settings').classList.remove('hidden')));
+$('btnSettingsClose').onclick = () => $('settings').classList.add('hidden');
+$('settings').addEventListener('pointerdown', (e) => { if (e.target.id === 'settings') $('settings').classList.add('hidden'); });
+
 function hostStart(seed) {
   G.seed = seed;
   net.send({ t: 'start', seed, fog: G.fog, hostRole: G.hostRole });

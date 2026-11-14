@@ -4,7 +4,9 @@ const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'st
 const ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 export class Net {
-  constructor() { this.peer = null; this.conn = null; this.handlers = {}; this.isHost = false; this.code = ''; this.mic = null; this.calls = []; }
+  constructor() { this.peer = null; this.conn = null; this.handlers = {}; this.isHost = false; this.code = ''; this.mic = null; this.calls = []; this.voiceVol = 1; this.micGain = 1; }
+  setVoiceVolume(v) { this.voiceVol = v; const a = document.getElementById('remoteAudio'); if (a) a.volume = v; }
+  setMicGain(v) { this.micGain = v; if (this.micGainNode) this.micGainNode.gain.value = v; }
   on(type, fn) { this.handlers[type] = fn; }
   emit(type, data) { this.handlers[type]?.(data); }
   get connected() { return !!(this.conn && this.conn.open); }
@@ -65,8 +67,18 @@ export class Net {
   send(msg) { if (this.connected) this.conn.send(msg); }
 
   async toggleMic() {
-    if (this.mic) { this.mic.getTracks().forEach((t) => t.stop()); this.mic = null; this.calls.forEach((c) => c.close()); this.calls = []; return false; }
-    this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    if (this.mic) { this._stopMic(); this.calls.forEach((c) => c.close()); this.calls = []; return false; }
+    this.rawMic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    // route through a gain node so the player can make their own mic louder/quieter
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      this.micCtx = this.micCtx || new AC(); await this.micCtx.resume();
+      const src = this.micCtx.createMediaStreamSource(this.rawMic);
+      this.micGainNode = this.micCtx.createGain(); this.micGainNode.gain.value = this.micGain;
+      const dest = this.micCtx.createMediaStreamDestination();
+      src.connect(this.micGainNode); this.micGainNode.connect(dest);
+      this.mic = dest.stream;
+    } catch (_) { this.mic = this.rawMic; this.micGainNode = null; }
     if (this.connected) this._callWithMic();
     return true;
   }
@@ -77,13 +89,18 @@ export class Net {
   _playRemote(stream) {
     let a = document.getElementById('remoteAudio');
     if (!a) { a = document.createElement('audio'); a.id = 'remoteAudio'; a.autoplay = true; document.body.appendChild(a); }
-    a.srcObject = stream; a.play().catch(() => {});
+    a.volume = this.voiceVol; a.srcObject = stream; a.play().catch(() => {});
+  }
+
+  _stopMic() {
+    for (const s of [this.mic, this.rawMic]) s?.getTracks().forEach((t) => t.stop());
+    this.mic = this.rawMic = this.micGainNode = null;
   }
 
   close() {
     try { this.conn?.close(); } catch (_) {}
     try { this.peer?.destroy(); } catch (_) {}
-    if (this.mic) this.mic.getTracks().forEach((t) => t.stop());
-    this.peer = this.conn = this.mic = null; this.calls = []; this.isHost = false;
+    this._stopMic();
+    this.peer = this.conn = null; this.calls = []; this.isHost = false;
   }
 }

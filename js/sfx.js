@@ -1,12 +1,13 @@
 // Tiny WebAudio sound layer: engine/skid loops (Kenney CC0 sounds), impacts, beeps, speech.
 export class Sfx {
-  constructor() { this.ctx = null; this.buf = {}; this.loops = null; }
+  constructor() { this.ctx = null; this.buf = {}; this.loops = null; this.vol = 0.7; }
+  setVolume(v) { this.vol = v; if (this.master) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.03); }
 
   init() {
     if (this.ctx) { this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     this.ctx = new AC();
-    this.master = this.ctx.createGain(); this.master.gain.value = 0.7; this.master.connect(this.ctx.destination);
+    this.master = this.ctx.createGain(); this.master.gain.value = this.vol; this.master.connect(this.ctx.destination);
     for (const n of ['engine', 'skid', 'impact']) {
       fetch(`assets/${n}.mp3`).then((r) => r.arrayBuffer()).then((a) => this.ctx.decodeAudioData(a)).then((b) => { this.buf[n] = b; if (this.wantLoops) this.startLoops(); }).catch(() => {});
     }
@@ -54,7 +55,8 @@ export class Sfx {
   }
   say(text, lang) {
     try {
-      const u = new SpeechSynthesisUtterance(text); u.lang = lang; u.rate = 1.25; u.pitch = 1.05;
+      const u = new SpeechSynthesisUtterance(text); u.lang = lang; u.rate = 1.25; u.pitch = 1.05; u.volume = Math.min(1, this.vol * 1.4);
+      if (u.volume <= 0) return;
       const v = speechSynthesis.getVoices().find((x) => x.lang && x.lang.replace('_', '-').startsWith(lang.slice(0, 2)));
       if (v) u.voice = v;
       speechSynthesis.cancel(); speechSynthesis.speak(u);

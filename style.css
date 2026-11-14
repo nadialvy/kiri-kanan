@@ -80,6 +80,12 @@ h2 { margin: 0; font-size: 36px; }
 #tL { left: 18px; } #tR { left: 122px; }
 #tGas { right: 18px; bottom: 90px !important; background: rgba(91,227,125,.8) !important; font-weight: 800; font-size: 22px !important; }
 
+#settings { z-index: 40; background: rgba(20,18,30,.45); }
+.vol { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; text-align: left; font-weight: 800; }
+.vol span { grid-column: 1 / -1; }
+.vol small { display: block; font-weight: 600; font-size: 12px; opacity: .6; }
+.vol input { width: 100%; accent-color: var(--red); height: 28px; }
+.vol b { font-family: 'JetBrains Mono', monospace; font-size: 14px; min-width: 48px; text-align: right; }
 .finMedal { font-size: 70px; line-height: 1; }
 #toast { position: fixed; top: 110px; left: 50%; transform: translate(-50%, -40px); opacity: 0; pointer-events: none; background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 14px; z-index: 50; transition: transform .3s, opacity .3s; font-weight: 600; max-width: 90vw; text-align: center; }
 #toast.show { transform: translate(-50%, 0); opacity: 1; }
