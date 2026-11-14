@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Kiri Kanan!</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<!-- ============ MENU ============ -->
+<section id="menu" class="screen">
+  <div class="card">
+    <h1>Kiri Kanan<span>!</span></h1>
+    <p class="tag">satu nyetir, satu baca peta.<br/>supirnya buta jalan, remnya nggak ada. good luck 💨</p>
+    <button id="btnHost" class="big primary">🚗 Buat Room</button>
+    <div class="row">
+      <input id="joinCode" maxlength="4" placeholder="KODE" autocomplete="off" spellcheck="false" />
+      <button id="btnJoin" class="big">Gabung</button>
+    </div>
+    <button id="btnSolo" class="ghost">Latihan solo (navigator bot)</button>
+    <p id="menuMsg" class="msg"></p>
+  </div>
+  <p class="credit">3D models &amp; sounds: <a href="https://kenney.nl" target="_blank" rel="noopener">Kenney</a> (CC0)</p>
+</section>
+
+<!-- ============ LOBBY ============ -->
+<section id="lobby" class="screen hidden">
+  <div class="card">
+    <p class="label">kode room</p>
+    <div id="roomCode" class="code">----</div>
+    <button id="btnCopy" class="ghost small">📋 copy link undangan</button>
+    <p id="lobbyStatus" class="msg">nunggu teman gabung…</p>
+
+    <div class="roles">
+      <div class="role" id="roleDriver"><div class="ico">🚗</div><b>Supir</b><small>gas + belok, ga tau jalan</small><em id="whoDriver">—</em></div>
+      <div class="role" id="roleNav"><div class="ico">🗺️</div><b>Navigator</b><small>liat peta, teriak kiri kanan</small><em id="whoNav">—</em></div>
+    </div>
+    <button id="btnSwap" class="ghost">🔄 Tukar peran</button>
+
+    <div class="opts">
+      <label>Kabut <select id="selFog"><option value="0">Tipis</option><option value="1" selected>Sedang</option><option value="2">Tebal 😵</option></select></label>
+      <label>Track <span id="seedLbl" class="mono">#0000</span> <button id="btnSeed" class="ghost small">🎲</button></label>
+    </div>
+    <button id="btnMic" class="ghost small">🎤 Voice chat: off</button>
+    <button id="btnStart" class="big primary" disabled>Mulai!</button>
+    <button id="btnLeave" class="ghost small">keluar</button>
+  </div>
+</section>
+
+<!-- ============ HUD ============ -->
+<section id="hud" class="hidden">
+  <div class="top">
+    <div id="timer" class="mono">0:00.0</div>
+    <div id="pen" class="mono pen"></div>
+    <div id="medal" class="medal"></div>
+  </div>
+  <div id="countdown"></div>
+  <div id="callout"></div>
+  <div id="speed" class="mono"><b>0</b><small>km/h</small></div>
+  <div id="hint"></div>
+  <div id="miniWrap" class="hidden"><canvas id="mini"></canvas></div>
+
+  <div id="tablet" class="hidden">
+    <div class="tabTop"><span id="tabNote" class="tnote">—</span><span id="tabDist" class="mono tdist"></span></div>
+    <div id="tabSub" class="tsub"></div>
+    <canvas id="map"></canvas>
+    <div id="tabNext" class="tnext"></div>
+    <div class="calls">
+      <button data-call="L">⬅<span>KIRI</span></button>
+      <button data-call="S">⬆<span>LURUS</span></button>
+      <button data-call="R">➡<span>KANAN</span></button>
+      <button data-call="SLOW">🐢<span>PELAN</span></button>
+      <button data-call="GO">🔥<span>GAS!</span></button>
+    </div>
+  </div>
+
+  <div id="touch" class="hidden">
+    <button id="tL">◀</button><button id="tR">▶</button><button id="tGas">GAS</button>
+  </div>
+  <div class="hudBtns">
+    <button id="btnMicHud" class="ghost small hidden">🎤</button>
+    <button id="btnQuit" class="ghost small">✕</button>
+  </div>
+</section>
+
+<!-- ============ FINISH ============ -->
+<section id="finish" class="screen hidden">
+  <div class="card">
+    <div id="finMedal" class="finMedal">🏆</div>
+    <h2 id="finTitle">FINISH!</h2>
+    <div id="finTime" class="code mono">0:00.0</div>
+    <p id="finBreak" class="msg"></p>
+    <p id="finBest" class="msg"></p>
+    <div class="row wrap">
+      <button id="finRetry" class="big primary">Ulangi</button>
+      <button id="finNew" class="big">Track baru</button>
+    </div>
+    <div class="row wrap">
+      <button id="finSwap" class="ghost">🔄 Tukar peran</button>
+      <button id="finMenu" class="ghost">Menu</button>
+    </div>
+    <p id="finWait" class="msg"></p>
+  </div>
+</section>
+
+<div id="toast"></div>
+<div id="loading">loading…</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
